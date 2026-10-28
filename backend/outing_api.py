@@ -53,7 +53,10 @@ router = APIRouter(prefix="/api/outing", tags=["outing"])
 
 UPLOAD_DIR = Path(__file__).parent / "uploads"
 load_dotenv(dotenv_path=Path(__file__).parent / ".env")
-UPLOAD_DIR.mkdir(exist_ok=True)
+try:
+    UPLOAD_DIR.mkdir(exist_ok=True)
+except OSError:  # 배포 버전: Vercel처럼 코드 폴더가 읽기 전용이면 건너뜀 (업로드는 Blob 없이는 어차피 미사용)
+    pass
 AZURE_LLM_USAGE_PATH = Path(__file__).parent / ".moov-azure-openai-usage.json"
 PIXABAY_CACHE_PATH = Path(__file__).parent / ".moov-pixabay-image-cache.json"
 
@@ -738,14 +741,10 @@ def _record_azure_usage(prompt_tokens: int, completion_tokens: int, deployment: 
 
 
 def _azure_openai_json(prompt: str, system_content: str | None = None, max_tokens_override: int | None = None) -> dict[str, Any] | None:
-    endpoint = (os.getenv("AZURE_OPENAI_ENDPOINT") or os.getenv("AZURE_FOUNDRY_ENDPOINT") or "").strip()
-    api_key = (os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("AZURE_FOUNDRY_API_KEY") or "").strip()
-    deployment = (
-        os.getenv("AZURE_OPENAI_RECOMMENDATION_DEPLOYMENT_NAME")
-        or os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
-        or ""
-    ).strip()
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview").strip()
+    # 로컬 버전: Azure 대신 config.py와 같은 OpenAI 호환 API(.env의 LLM_*)를 사용
+    endpoint = os.getenv("LLM_BASE_URL", "").strip()
+    api_key = os.getenv("LLM_API_KEY", "").strip()
+    deployment = os.getenv("LLM_MODEL", "").strip()
     if not endpoint or not api_key or not deployment:
         return None
     max_tokens = max_tokens_override or int(os.getenv("MOOV_AZURE_RECOMMENDATION_MAX_TOKENS", "700"))
@@ -753,9 +752,9 @@ def _azure_openai_json(prompt: str, system_content: str | None = None, max_token
     if not _azure_budget_allows(estimated_input, max_tokens):
         return None
     try:
-        from openai import AzureOpenAI
+        from openai import OpenAI
 
-        client = AzureOpenAI(azure_endpoint=endpoint, api_key=api_key, api_version=api_version)
+        client = OpenAI(base_url=endpoint, api_key=api_key)
         response = client.chat.completions.create(
             model=deployment,
             messages=[
